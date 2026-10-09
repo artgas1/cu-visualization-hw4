@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Мои заказы — личная аналитика</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app" v-cloak>
+    <main class="page-shell">
+      <header class="masthead">
+        <div>
+          <p class="kicker">ГРУША / ЛИЧНАЯ АНАЛИТИКА</p>
+          <h1>Мои заказы</h1>
+          <p class="lede">Дом и дача, вариант А <span class="dot">·</span> Артём Гаспарян</p>
+        </div>
+        <div class="controls" aria-label="Фильтры">
+          <label>Месяц
+            <select v-model="selectedMonth" aria-label="Выбранный месяц">
+              <option v-for="month in months" :key="month" :value="month">{{ monthLabel(month) }}</option>
+            </select>
+          </label>
+          <label>Категория
+            <select v-model="selectedCategory" aria-label="Выбранная категория">
+              <option value="">Все категории</option>
+              <option v-for="category in categories" :key="category" :value="category">{{ category }}</option>
+            </select>
+          </label>
+          <button class="reset-button" type="button" @click="resetFilters">Сбросить</button>
+        </div>
+      </header>
+
+      <div class="status-line">
+        <span>Показан месяц: <strong>{{ monthLabel(selectedMonth) }}</strong></span>
+        <button v-if="selectedCategory" class="clear-filter" type="button" @click="selectedCategory = ''">× {{ selectedCategory }}</button>
+        <span class="window-note">Графики: последние 24 месяца до выбранной даты</span>
+      </div>
+
+      <section class="kpi-grid" aria-label="Показатели выбранного месяца">
+        <article v-for="metric in metricCards" :key="metric.key" class="kpi-card">
+          <div class="kpi-heading"><span>{{ metric.label }}</span><span class="kpi-unit">{{ metric.unit }}</span></div>
+          <div class="kpi-value">{{ metric.display }}</div>
+          <div class="kpi-change" :class="metric.changeClass">{{ metric.changeText }}</div>
+          <svg class="metric-chart" :ref="el => registerMetricSvg(metric.key, el)" role="img" :aria-label="metric.label + ', динамика за 24 месяца'"></svg>
+        </article>
+      </section>
+
+      <section class="content-grid">
+        <article class="panel products-panel">
+          <div class="panel-header">
+            <div><p class="section-kicker">ТОП-ПОКУПКИ</p><h2>Что занимает бюджет</h2><p class="subtle">{{ monthLabel(windowStart) }} — {{ monthLabel(selectedMonth) }} · 12 товаров · без услуг</p></div>
+            <div class="sort-toggle" role="group" aria-label="Сортировка товаров">
+              <button type="button" :class="{active: productSort === 'money'}" @click="productSort = 'money'">По сумме</button>
+              <button type="button" :class="{active: productSort === 'quantity'}" @click="productSort = 'quantity'">По количеству</button>
+            </div>
+          </div>
+          <div class="product-chart-wrap">
+            <svg ref="productSvg" class="product-chart" role="img" aria-label="Сравнение количества и расходов по товарам"></svg>
+            <p v-if="!products.length" class="empty-state">Для этого фильтра нет товаров.</p>
+          </div>
+          <div v-if="detailProduct" class="detail-card" role="dialog" aria-label="Подробности о товаре" :style="detailStyle" :class="{pinned: detailPinned}">
+            <div class="detail-top">
+              <img :src="imageFor(detailProduct.item)" :alt="detailProduct.item" @error="hideBrokenImage">
+              <div><p class="section-kicker">{{ detailPinned ? 'ЗАКРЕПЛЕНО' : 'ПОДРОБНОСТИ' }}</p><h3>{{ detailProduct.item }}</h3><p class="subtle">{{ detailProduct.category }}</p></div>
+              <button class="close-detail" type="button" aria-label="Закрыть подробности" @click="closeDetail">×</button>
+            </div>
+            <div class="detail-stats"><span><b>{{ fmtNumber(detailProduct.quantity) }}</b> шт.</span><span><b>{{ fmtMoney(detailProduct.spending) }}</b> расходов</span><span><b>{{ fmtMoney(detailProduct.weightedPrice) }}</b> средняя цена покупки</span></div>
+            <div class="sparkline-box"><div class="sparkline-label">Фактическая цена по месяцам</div><svg ref="sparkSvg" class="sparkline" aria-label="История фактической цены"></svg></div>
+          </div>
+        </article>
+
+        <article class="panel category-panel">
+          <div class="panel-header"><div><p class="section-kicker">СТРУКТУРА</p><h2>Категории</h2><p class="subtle">Все категории за 24 месяца · нажми, чтобы отфильтровать</p></div></div>
+          <div class="category-head"><span>Категория</span><span>Расходы</span><span>Кол-во</span><span>Заказы</span><span>Скидка</span></div>
+          <button v-for="row in categoryRows" :key="row.category" type="button" class="category-row" :class="{selected: selectedCategory === row.category}" @click="toggleCategory(row.category)">
+            <span class="category-name"><i class="category-bar" :style="{width: row.share + '%'}"></i>{{ row.category }}</span>
+            <span>{{ fmtMoney(row.spending) }}<small class="category-share">{{ row.share.toFixed(1) }}% расходов</small></span><span>{{ row.category === 'Услуги Груши' ? '—' : fmtNumber(row.quantity) }}</span><span>{{ row.orders }}</span><span>{{ row.discount == null ? '—' : fmtPercent(row.discount) }}</span>
+          </button>
+          <div class="category-foot"><span>Всего по категориям</span><strong>{{ fmtMoney(totalCategorySpend) }}</strong></div>
+        </article>
+      </section>
+
+      <details class="methodology"><summary>Как считаем</summary><div class="methodology-body"><p>В выборке только доставленные заказы, период заканчивается августом 2026 года. Заказ считается один раз по его номеру, даже если в нём несколько строк.</p><p>Расходы — сумма поля «оплачено» (amount). Средняя скидка взвешена по полной стоимости: 1 − Σ(amount) / Σ(price × quantity). В истории продуктов средняя цена — сумма оплаченного / сумма количества, а не каталоговая цена.</p><p>Товары и категории считаются за последние 24 месяца до выбранного месяца. Услуги Груши исключены только из продуктового графика, но остаются в списке категорий и общих метриках.</p></div></details>
+      <footer><span>Данные: доставленные заказы · 09.2021—08.2026</span><span>Артём Гаспарян · вариант А</span></footer>
+    </main>
+    <div v-if="errorMessage" class="error-overlay" role="alert"><strong>Не удалось построить дашборд</strong><span>{{ errorMessage }}</span></div>
+  </div>
+  <script src="vendor/vue.global.prod.js"></script>
+  <script src="vendor/d3.min.js"></script>
+  <script src="data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
